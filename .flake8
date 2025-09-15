@@ -1,0 +1,26 @@
+[flake8]
+# Match Black’s defaults
+max-line-length = 88
+
+# Exclude common non-source directories
+exclude =
+    .git,
+    __pycache__,
+    venv,
+    env,
+    .venv,
+    migrations,
+    .mypy_cache,
+    .pytest_cache,
+    recona_python.egg-info,
+    build
+
+# Ignore rules that conflict with Black
+ignore =
+    E203
+    W503
+    E501
+
+# Allow unused imports in __init__.py (for package exports)
+per-file-ignores =
+    __init__.py:F401

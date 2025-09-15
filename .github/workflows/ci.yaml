@@ -1,0 +1,230 @@
+name: Lint, SAST, Test
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - dev
+
+jobs:
+  SAST:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    outputs:
+      lint_passed: ${{ steps.lint_check.outcome }}
+      dependency_scan_passed: ${{ steps.dependency_scan.outcome }}
+      trivy_scan_passed: ${{ steps.trivy_fs_scan.outcome }}
+      gitleaks_scan_passed: ${{ steps.gitleaks_scan.outcome }}
+      bandit_scan_passed: ${{ steps.bandit_scan.outcome }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8 black isort mypy bandit[toml]
+          # Install project dependencies if requirements.txt exists
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          # Install project dependencies if pyproject.toml exists
+          if [ -f pyproject.toml ]; then pip install .; fi
+
+      - name: Run Python linting (flake8, black, isort, mypy)
+        id: lint_check
+        run: |
+          # Initialize lint flag
+          LINT_ISSUES=false
+
+          echo "Running flake8..."
+          if ! flake8 --format=json --output-file=flake8-report.json .; then
+            if [ -f flake8-report.json ] && [ "$(jq -r '. | length' flake8-report.json)" != "0" ]; then
+              LINT_ISSUES=true
+            fi
+          fi
+
+          echo "Running black check..."
+          if ! black --check --diff . > black-report.txt 2>&1; then
+            LINT_ISSUES=true
+          fi
+
+          echo "Running isort check..."
+          if ! isort --check-only --diff . > isort-report.txt 2>&1; then
+            LINT_ISSUES=true
+          fi
+
+          echo "Running mypy..."
+          if ! mypy --no-error-summary --show-error-codes . > mypy-report.txt 2>&1; then
+            LINT_ISSUES=true
+          fi
+
+          # Export result
+          if [ "$LINT_ISSUES" = true ]; then
+            echo "lint_failed=true" >> $GITHUB_ENV
+          else
+            echo "lint_failed=false" >> $GITHUB_ENV
+          fi
+
+      - name: Install OSV-Scanner
+        run: |
+          curl -L -o osv-scanner https://github.com/google/osv-scanner/releases/latest/download/osv-scanner_linux_amd64
+          chmod +x osv-scanner
+          sudo mv osv-scanner /usr/local/bin/
+
+      - name: Run OSV-Scanner (Dependency Vulnerability Scan)
+        id: dependency_scan
+        run: |
+          osv-scanner --format sarif --output osv-scanner.sarif --recursive . || true
+          if [ -f osv-scanner.sarif ] && grep -q '"ruleId":' osv-scanner.sarif; then
+            echo "vulnerabilities_found=true" >> $GITHUB_ENV
+          else
+            echo "vulnerabilities_found=false" >> $GITHUB_ENV
+          fi
+
+      - name: Run Bandit (Python Security Linter)
+        id: bandit_scan
+        run: |
+          bandit -r . -f sarif -o bandit.sarif || true
+          if [ -f bandit.sarif ] && grep -q '"ruleId":' bandit.sarif; then
+            echo "bandit_issues_found=true" >> $GITHUB_ENV
+          else
+            echo "bandit_issues_found=false" >> $GITHUB_ENV
+          fi
+
+      - name: Install Trivy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget apt-transport-https gnupg lsb-release
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+          echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update
+          sudo apt-get install -y trivy
+
+      - name: Generate dependency SBOM
+        run: |
+          trivy fs --format cyclonedx --output sbom.json .
+
+      - name: Run Trivy filesystem scan
+        id: trivy_fs_scan
+        run: |
+          trivy fs --format sarif --output trivy-fs.sarif . || true
+          if [ -f trivy-fs.sarif ] && grep -q '"ruleId":' trivy-fs.sarif; then
+            echo "trivy_issues_found=true" >> $GITHUB_ENV
+          else
+            echo "trivy_issues_found=false" >> $GITHUB_ENV
+          fi
+
+      - name: Install Gitleaks v8
+        run: |
+          GITLEAKS_VERSION=$(curl -s https://api.github.com/repos/gitleaks/gitleaks/releases/latest | grep -Po '"tag_name": "v\K[^"]*')
+          wget -q https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz
+          tar -xzf gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz
+          chmod +x gitleaks
+          sudo mv gitleaks /usr/local/bin/
+          gitleaks version
+
+      - name: Run Gitleaks scan (SARIF)
+        id: gitleaks_scan
+        run: |
+          gitleaks detect --source . --report-format sarif --report-path gitleaks.sarif || true
+          # Create empty SARIF if no file was created
+          if [ ! -f gitleaks.sarif ]; then
+            echo '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"gitleaks"}},"results":[]}]}' > gitleaks.sarif
+          fi
+          if grep -q '"ruleId":' gitleaks.sarif; then
+            echo "secrets_found=true" >> $GITHUB_ENV
+          else
+            echo "secrets_found=false" >> $GITHUB_ENV
+          fi
+
+      - name: Upload SARIF and report artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports
+          path: |
+            flake8-report.json
+            black-report.txt
+            isort-report.txt
+            mypy-report.txt
+            osv-scanner.sarif
+            bandit.sarif
+            trivy-fs.sarif
+            gitleaks.sarif
+            sbom.json
+
+      - name: Fail if lint issues found
+        if: env.lint_failed == 'true'
+        run: |
+          echo "Python linting issues found. Check the reports for details."
+          exit 1
+
+      - name: Fail if dependencies vulnerabilities found
+        if: env.vulnerabilities_found == 'true'
+        run: |
+          echo "Dependency vulnerabilities found. Check OSV-Scanner report for details."
+          exit 1
+
+      - name: Fail if Python security issues found
+        if: env.bandit_issues_found == 'true'
+        run: |
+          echo "Python security issues found. Check Bandit report for details."
+          exit 1
+
+      - name: Fail if secrets found by Gitleaks
+        if: env.secrets_found == 'true'
+        run: |
+          echo "Secrets found in repository. Check Gitleaks report for details."
+          exit 1
+
+      - name: Fail if Trivy issues found
+        if: env.trivy_issues_found == 'true'
+        run: |
+          echo "Infrastructure/filesystem issues found. Check Trivy report for details."
+          exit 1
+
+  test:
+    runs-on: ubuntu-latest
+    needs: SAST
+    if: needs.SAST.result == 'success'
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.10', '3.11', '3.12']
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-cov pytest-xvfb
+          # Install project dependencies
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+          if [ -f pyproject.toml ]; then pip install -e .; fi
+
+      - name: Run Python tests with pytest
+        run: |
+          pytest --cov=. --cov-report=xml --cov-report=html --cov-report=term -v
+
+      - name: Upload coverage reports
+        if: matrix.python-version == '3.11'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: |
+            coverage.xml
+            htmlcov/
