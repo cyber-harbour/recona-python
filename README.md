@@ -22,13 +22,13 @@ Recona delivers extensive cybersecurity intelligence including:
 - **Business Intelligence**: Organization and industry data linked to domain names
 - **Contact Discovery**: Email addresses discovered during internet scanning
 
-For detailed information about available data, visit our [Our Data](https://recona.io/our-data) page.
+For detailed information about available data, visit our [Our Data](https://recona.io) page.
 
 ## Authentication
 
-Recona API uses **token-based authentication**. API tokens are available exclusively to registered users on their [account page](https://recona.io/user).
+Recona API uses **token-based authentication**. API tokens are available exclusively to registered users on their [account page](https://reconatest.io/account).
 
-For comprehensive API documentation, see our [API Reference](https://recona-dev.readme.io/reference/quick-start).
+For comprehensive API documentation, see our [API Reference](https://reconatest.io/docs/search-concept).
 
 ## Installation
 
