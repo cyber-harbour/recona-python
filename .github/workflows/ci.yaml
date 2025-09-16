@@ -41,9 +41,12 @@ jobs:
       - name: Run Python linting (flake8, black, isort, mypy)
         id: lint_check
         run: |
+          echo "Installing type stubs..."
+          pip install types-setuptools types-requests
+          
           # Initialize lint flag
-          LINT_ISSUES=false
-
+          LINT_ISSUES=false 
+          
           echo "Running flake8..."
           if ! flake8 --format=json --output-file=flake8-report.json .; then
             if [ -f flake8-report.json ] && [ "$(jq -r '. | length' flake8-report.json)" != "0" ]; then

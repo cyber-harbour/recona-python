@@ -175,7 +175,9 @@ class Client:
         raw_results = response.raw.get("autonomous_systems", [])
         results = [AS(**item) for item in raw_results]
 
-        total_items = response.raw.get("total_items", []).get("value", []) or 0
+        total_items = 0
+        if "total_items" in response.raw and response.raw["total_items"]:
+            total_items = response.raw["total_items"].get("value", 0)
         has_more = (offset + len(results)) < min(
             total_items, getattr(self, "SEARCH_RESULTS_LIMIT", total_items)
         )
@@ -209,7 +211,9 @@ class Client:
         raw_results = response.raw.get("domains", [])
         results = [Domain(**item) for item in raw_results]
 
-        total_items = response.raw.get("total_items", []).get("value", []) or 0
+        total_items = 0
+        if "total_items" in response.raw and response.raw["total_items"]:
+            total_items = response.raw["total_items"].get("value", 0)
         has_more = (offset + len(results)) < min(
             total_items, getattr(self, "SEARCH_RESULTS_LIMIT", total_items)
         )
@@ -240,7 +244,9 @@ class Client:
         raw_results = response.raw.get("hosts", [])
         results = [Host(**item) for item in raw_results]
 
-        total_items = response.raw.get("total_items", []).get("value", []) or 0
+        total_items = 0
+        if "total_items" in response.raw and response.raw["total_items"]:
+            total_items = response.raw["total_items"].get("value", 0)
         has_more = (offset + len(results)) < min(
             total_items, getattr(self, "SEARCH_RESULTS_LIMIT", total_items)
         )
@@ -271,7 +277,9 @@ class Client:
         raw_results = response.raw.get("certificates", [])
         results = [Certificate(**item) for item in raw_results]
 
-        total_items = response.raw.get("total_items", []).get("value", []) or 0
+        total_items = 0
+        if "total_items" in response.raw and response.raw["total_items"]:
+            total_items = response.raw["total_items"].get("value", 0)
         has_more = (offset + len(results)) < min(
             total_items, getattr(self, "SEARCH_RESULTS_LIMIT", total_items)
         )
@@ -302,7 +310,9 @@ class Client:
         raw_results = response.raw.get("cve_list", [])
         results = [NistCVEData(**item) for item in raw_results]
 
-        total_items = response.raw.get("total_items", []).get("value", []) or 0
+        total_items = 0
+        if "total_items" in response.raw and response.raw["total_items"]:
+            total_items = response.raw["total_items"].get("value", 0)
         has_more = (offset + len(results)) < min(
             total_items, getattr(self, "SEARCH_RESULTS_LIMIT", total_items)
         )
@@ -326,6 +336,7 @@ class Client:
         all_results: List[T] = []
         offset = 0
         total_items: Optional[int] = None
+        has_more = False
 
         while len(all_results) < self.SEARCH_RESULTS_LIMIT:
             batch = search_method(query, batch_size, offset)
